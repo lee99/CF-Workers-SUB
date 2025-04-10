@@ -110,7 +110,7 @@ export default {
 		let kvLinkKey = 'LINK.txt'; // 在 KV 中存储源列表的键
 
 		// 处理 KV 存储 (如果已启用)
-		if (env.KV) {
+			if (env.KV) {
 			await migrateSourcesToKV(env, kvLinkKey); // 如果需要，将源从环境变量迁移到 KV
 
 			// 如果 User-Agent 看起来像浏览器且没有查询参数，则显示 KV 编辑器
@@ -121,14 +121,14 @@ export default {
 				// 注意：KV 编辑器现在只处理 POST 请求用于保存，GET 请求显示编辑器页面
                 if (request.method === 'POST') {
                     return await handleKvEditorRequest(request, env, kvLinkKey, guestSubscriptionToken); // 处理保存
-                } else {
+				} else {
 				    return await handleKvEditorRequest(request, env, kvLinkKey, guestSubscriptionToken); // 显示编辑器
-                }
+				}
 			} else {
 				// 否则，从 KV 加载源，如果 KV 中没有则回退到默认值
 				currentSources = await env.KV.get(kvLinkKey) || defaultSources;
 			}
-		} else {
+				} else {
 			// 如果未使用 KV，则处理环境变量存储
 			currentSources = env.LINK || defaultSources; // 从 ENV.LINK 加载主要源
 			if (env.LINKSUB) { // 从 ENV.LINKSUB 加载额外的订阅 URL
@@ -199,7 +199,7 @@ export default {
             const utf8Bytes = new TextEncoder().encode(finalNodesData);
             const binaryString = String.fromCharCode(...utf8Bytes);
 			base64EncodedNodes = btoa(binaryString);
-		} catch (e) {
+			} catch (e) {
 			console.error("Base64 编码失败:", e);
 			// 如果 btoa 意外失败，进行回退或错误处理
 			return new Response("将数据编码为 Base64 时出错。", { status: 500 });
@@ -253,9 +253,9 @@ export default {
 		// 从后端获取转换后的订阅
 		try {
 			// console.log("SubConverter URL:", subConverterUrl); // 调试用
-			const subConverterResponse = await fetch(subConverterUrl);
+				const subConverterResponse = await fetch(subConverterUrl);
 
-			if (!subConverterResponse.ok) {
+				if (!subConverterResponse.ok) {
 				console.error(`从 subConverterUrl (${subConverterUrl}) 获取错误: ${subConverterResponse.status} ${subConverterResponse.statusText}`);
 				const errorBody = await subConverterResponse.text();
                 console.error("SubConverter 错误响应体:", errorBody);
@@ -289,14 +289,14 @@ export default {
 			console.error("订阅转换获取期间出错:", error);
 			// 对任何获取错误回退到 base64
 			return new Response(base64EncodedNodes, {
-				headers: {
+			headers: {
 					"content-type": "text/plain; charset=utf-8",
 					"Profile-Update-Interval": `${subscriptionUpdateIntervalHours}`,
 					//"Subscription-Userinfo": subscriptionUserInfo, // 取消注释以启用
-				}
-			});
-		}
+			}
+		});
 	}
+}
 };
 
 // --- 辅助函数 ---
@@ -419,8 +419,8 @@ async function proxyRequest(targetProxyUrl, originalRequest) {
         }
 
         return new Response(response.body, {
-            status: response.status,
-            statusText: response.statusText,
+		status: response.status,
+		statusText: response.statusText,
             headers: newResponseHeaders
         });
 
@@ -569,8 +569,8 @@ function isValidBase64(str) {
     // 和可选的填充符 (=)。
 	const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/; // 更严格的正则，允许末尾最多两个=
 	if (!base64Regex.test(cleanStr)) {
-		return false;
-	}
+	return false;
+}
     // 进一步检查: 尝试解码。如果抛出异常，则可能不是有效的 Base64。
     try {
         atob(cleanStr);
@@ -631,7 +631,7 @@ async function migrateSourcesToKV(env, kvKey = 'LINK.txt') {
 			// 但这不能从 Worker 本身完成。建议用户手动移除它们。
 			console.warn("验证迁移后，请从您的 Worker 设置中移除 LINK 和 LINKSUB 环境变量。");
 
-		} catch (error) {
+			} catch (error) {
 			console.error("源向 KV 迁移期间出错:", error);
 		}
 	} else {
@@ -666,6 +666,7 @@ async function handleKvEditorRequest(request, env, kvKey = 'LINK.txt', guestToke
                 await env.KV.put(kvKey, newContent.trim());
                 message = '列表已成功更新！';
                 messageType = 'success';
+                // 可选: 更新时发送 TG 通知 (功能已移除)
             } catch (error) {
                 console.error("更新 KV 列表时出错:", error);
                 message = '更新列表时出错：' + error.message;
@@ -674,13 +675,14 @@ async function handleKvEditorRequest(request, env, kvKey = 'LINK.txt', guestToke
         } else {
              message = '无效的请求格式。请使用表单提交。';
              messageType = 'error';
-             // 返回 415 Unsupported Media Type 状态码可能更合适
-             // return new Response(message, { status: 415 });
         }
 	}
 
 	// 获取当前列表内容以供显示
 	const currentContent = await env.KV.get(kvKey) || '';
+
+    // 构建基础订阅 URL (使用 adminToken)
+    const baseSubscriptionUrl = `${url.origin}/${adminToken}`; // 使用 adminToken 作为路径
 
 	// 生成编辑器的 HTML 页面
 	const html = `
@@ -695,10 +697,14 @@ async function handleKvEditorRequest(request, env, kvKey = 'LINK.txt', guestToke
 		.navbar { background-color: #343a40; padding: 0.8rem 1.5rem; color: white; margin-bottom: 2rem; }
         .navbar h1 { margin: 0; font-size: 1.5rem; }
 		.container { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem; background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-		h2 { color: #343a40; border-bottom: 2px solid #dee2e6; padding-bottom: 0.6em; margin-top: 2rem; margin-bottom: 1.5rem; }
-		textarea { width: 100%; min-height: 400px; margin-bottom: 1.5em; border: 1px solid #ced4da; border-radius: 4px; padding: 0.75em; font-size: 14px; box-sizing: border-box; resize: vertical; }
-		button { padding: 0.75em 1.5em; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; transition: background-color 0.2s ease; }
+		h2 { color: #343a40; border-bottom: 2px solid #dee2e6; padding-bottom: 0.6em; margin-top: 0; margin-bottom: 1.5rem; } /* Adjusted h2 margin */
+        h3 { color: #343a40; margin-top: 2rem; margin-bottom: 1rem; }
+		textarea { width: 100%; min-height: 300px; margin-bottom: 1.5em; border: 1px solid #ced4da; border-radius: 4px; padding: 0.75em; font-size: 14px; box-sizing: border-box; resize: vertical; }
+		button { padding: 0.75em 1.5em; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; transition: background-color 0.2s ease; vertical-align: middle; /* Align button */ }
 		button:hover { background-color: #0056b3; }
+        .copy-btn { background-color: #28a745; margin-left: 0.5em; /* Add some space */ }
+        .copy-btn:hover { background-color: #218838; }
+        .copy-btn.copied { background-color: #ffc107; color: #333; cursor: default; }
 		.message { margin-bottom: 1.5em; padding: 1em; border-radius: 4px; border: 1px solid transparent; }
 		.message.success { background-color: #d1e7dd; color: #0f5132; border-color: #badbcc; }
 		.message.error { background-color: #f8d7da; color: #842029; border-color: #f5c2c7; }
@@ -708,6 +714,11 @@ async function handleKvEditorRequest(request, env, kvKey = 'LINK.txt', guestToke
         .info-section ul { padding-left: 20px; margin-bottom: 0; }
         .token-display { background-color: #adb5bd; padding: 0.3em 0.6em; border-radius: 4px; font-family: monospace; word-break: break-all; color: #fff; display: inline-block; margin-top: 0.5em; }
         label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+        select, input[type="text"] { width: 100%; padding: 0.5em; margin-bottom: 1em; border: 1px solid #ced4da; border-radius: 4px; box-sizing: border-box; font-size: 1em; }
+        .form-group { margin-bottom: 1.5rem; }
+        .url-display-group { display: flex; align-items: center; gap: 0.5em; }
+        .url-display-group input { flex-grow: 1; margin-bottom: 0; /* Remove margin bottom from input in group */ }
+        .url-display-group button { flex-shrink: 0; }
         footer { text-align: center; margin-top: 3rem; padding: 1rem; font-size: 0.85em; color: #6c757d; }
 	</style>
 </head>
@@ -716,32 +727,123 @@ async function handleKvEditorRequest(request, env, kvKey = 'LINK.txt', guestToke
         <h1>${subscriptionFileName} - 订阅源管理</h1>
     </div>
 	<div class="container">
-		<h2>编辑订阅源列表 (${kvKey})</h2>
 		${message ? `<div class="message ${messageType}">${message}</div>` : ''}
+
+        <!-- 订阅链接生成区域 -->
+        <h3>生成订阅链接</h3>
+        <div class="form-group">
+            <label for="formatSelect">选择订阅格式:</label>
+            <select id="formatSelect">
+                <option value="auto">自动判断 (默认)</option>
+                <option value="base64">Base64</option>
+                <option value="clash">Clash</option>
+                <option value="singbox">Sing-Box</option>
+                <option value="surge">Surge</option>
+                <option value="quanx">Quantumult X</option>
+                <option value="loon">Loon</option>
+            </select>
+        </div>
+        <div class="form-group url-display-group">
+            <input type="text" id="generatedUrl" readonly placeholder="选择格式后将在此显示订阅链接">
+            <button type="button" id="copyUrlBtn" class="copy-btn">复制</button>
+        </div>
+
+		<!-- 编辑器区域 -->
+        <h3>编辑订阅源列表 (${kvKey})</h3>
 		<form method="POST" action="">
             <label for="content">源列表内容 (每行一个链接或节点信息):</label>
 			<textarea id="content" name="content" placeholder="在此输入订阅链接或节点信息，每行一个...\n例如:\nhttps://example.com/mysub\nvmess://...\ntrojan://...">${currentContent}</textarea>
 			<button type="submit">保存更改</button>
 		</form>
 
+        <!-- 说明区域 -->
         <div class="info-section">
             <h3>使用说明</h3>
             <ul>
-                <li>在此编辑器中管理您的订阅源和手动添加的节点。</li>
+                <li>在上方编辑器中管理您的订阅源和手动添加的节点。</li>
                 <li>每行输入一个订阅链接（以 http 或 https 开头）或单个节点信息。</li>
                 <li>支持 vmess, vless, trojan, ss, ssr, hy2, tuic 等常见格式的节点链接。</li>
-                <li>编辑完成后，点击上方的"保存更改"按钮。</li>
+                <li>编辑完成后，点击"保存更改"按钮。</li>
+                <li>上方提供订阅链接生成功能，选择所需格式即可生成并复制。</li>
                 <li>您的访客订阅令牌（只读，用于分享给他人使用订阅功能）: <span class="token-display">${guestToken || '未配置/生成'}</span></li>
-                <li>要生成普通订阅链接，请访问 Worker 的根路径并添加相应的参数（如 ?clash, ?base64 等）。</li>
+                <li>分享访客链接格式为: <code>${url.origin}/sub?token=${guestToken || 'GUEST_TOKEN'}&lt;格式参数&gt;</code> (例如: <code>&clash</code>, <code>&base64</code>)</li>
             </ul>
         </div>
 	</div>
     <footer>
         Powered by CF-Workers-SUB
     </footer>
+
 	<script>
-		// 可选: 在此处添加客户端验证或增强功能
-        // 例如，保存前检查内容格式
+        const formatSelect = document.getElementById('formatSelect');
+        const generatedUrlInput = document.getElementById('generatedUrl');
+        const copyUrlBtn = document.getElementById('copyUrlBtn');
+        const baseSubUrl = '${baseSubscriptionUrl}'; // 从后端获取基础 URL
+
+        function updateGeneratedUrl() {
+            const selectedFormat = formatSelect.value;
+            let finalUrl = baseSubUrl;
+
+            switch (selectedFormat) {
+                case 'base64':
+                    finalUrl += '?base64'; // 或者 ?b64
+                    break;
+                case 'clash':
+                    finalUrl += '?clash';
+                    break;
+                case 'singbox':
+                    finalUrl += '?sb'; // 或者 ?singbox
+                    break;
+                case 'surge':
+                    finalUrl += '?surge';
+                    break;
+                case 'quanx':
+                    finalUrl += '?quanx';
+                    break;
+                case 'loon':
+                    finalUrl += '?loon';
+                    break;
+                case 'auto':
+                default:
+                    // 自动判断时，不添加特定格式参数
+                    break;
+            }
+            generatedUrlInput.value = finalUrl;
+            // 重置复制按钮状态
+            copyUrlBtn.textContent = '复制';
+            copyUrlBtn.classList.remove('copied');
+            copyUrlBtn.disabled = false;
+        }
+
+        formatSelect.addEventListener('change', updateGeneratedUrl);
+
+        copyUrlBtn.addEventListener('click', () => {
+            const urlToCopy = generatedUrlInput.value;
+            if (!urlToCopy) return; // 如果没有 URL，则不执行任何操作
+
+            navigator.clipboard.writeText(urlToCopy).then(() => {
+                // 复制成功反馈
+                copyUrlBtn.textContent = '已复制!';
+                copyUrlBtn.classList.add('copied');
+                copyUrlBtn.disabled = true;
+                // 1.5 秒后恢复按钮状态
+                setTimeout(() => {
+                    copyUrlBtn.textContent = '复制';
+                    copyUrlBtn.classList.remove('copied');
+                    copyUrlBtn.disabled = false;
+                }, 1500);
+            }).catch(err => {
+                console.error('复制失败:', err);
+                // 可以选择给用户一个错误提示，例如 alert('复制失败，请手动复制。');
+                copyUrlBtn.textContent = '复制失败';
+                 setTimeout(() => {
+                    copyUrlBtn.textContent = '复制';
+                 }, 2000);
+            });
+        });
+
+        // 初始化时生成一次链接
+        updateGeneratedUrl();
 	</script>
 </body>
 </html>`;
