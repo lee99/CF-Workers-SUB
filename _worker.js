@@ -1,11 +1,7 @@
-
 // 部署完成后在网址后面加上这个，获取自建节点和机场聚合节点，/?token=auto或/auto或
 
 let mytoken = 'auto';
 let guestToken = ''; //可以随便取，或者uuid生成，https://1024tools.com/uuid
-let BotToken = ''; //可以为空，或者@BotFather中输入/start，/newbot，并关注机器人
-let ChatID = ''; //可以为空，或者@userinfobot中获取，/start
-let TG = 0; //小白勿动， 开发者专用，1 为推送所有的访问信息，0 为不推送订阅转换后端的访问信息与异常访问
 let FileName = 'CF-Workers-SUB';
 let SUBUpdateTime = 6; //自定义订阅更新时间，单位小时
 let total = 99;//TB
@@ -34,9 +30,6 @@ export default {
 		const url = new URL(request.url);
 		const token = url.searchParams.get('token');
 		mytoken = env.TOKEN || mytoken;
-		BotToken = env.TGTOKEN || BotToken;
-		ChatID = env.TGID || ChatID;
-		TG = env.TG || TG;
 		subConverter = env.SUBAPI || subConverter;
 		if (subConverter.includes("http://")) {
 			subConverter = subConverter.split("//")[1];
@@ -62,20 +55,13 @@ export default {
 		SUBUpdateTime = env.SUBUPTIME || SUBUpdateTime;
 
 		if (!([mytoken, fakeToken, 访客订阅].includes(token) || url.pathname == ("/" + mytoken) || url.pathname.includes("/" + mytoken + "?"))) {
-			if (TG == 1 && url.pathname !== "/" && url.pathname !== "/favicon.ico") await sendMessage(`#异常访问 ${FileName}`, request.headers.get('CF-Connecting-IP'), `UA: ${userAgent}</tg-spoiler>\n域名: ${url.hostname}\n<tg-spoiler>入口: ${url.pathname + url.search}</tg-spoiler>`);
 			if (env.URL302) return Response.redirect(env.URL302, 302);
 			else if (env.URL) return await proxyURL(env.URL, url);
-			else return new Response(await nginx(), {
-					status: 200,
-					headers: {
-						'Content-Type': 'text/html; charset=UTF-8',
-					},
-				});
+			else return new Response(null, { status: 403 });
 		} else {
 			if (env.KV) {
 				await 迁移地址列表(env, 'LINK.txt');
 				if (userAgent.includes('mozilla') && !url.search) {
-					await sendMessage(`#编辑订阅 ${FileName}`, request.headers.get('CF-Connecting-IP'), `UA: ${userAgentHeader}</tg-spoiler>\n域名: ${url.hostname}\n<tg-spoiler>入口: ${url.pathname + url.search}</tg-spoiler>`);
 					return await KV(request, env, 'LINK.txt', 访客订阅);
 				} else {
 					MainData = await env.KV.get('LINK.txt') || MainData;
@@ -96,7 +82,6 @@ export default {
 			}
 			MainData = 自建节点;
 			urls = await ADD(订阅链接);
-			await sendMessage(`#获取订阅 ${FileName}`, request.headers.get('CF-Connecting-IP'), `UA: ${userAgentHeader}</tg-spoiler>\n域名: ${url.hostname}\n<tg-spoiler>入口: ${url.pathname + url.search}</tg-spoiler>`);
 
 			let 订阅格式 = 'base64';
 			if (userAgent.includes('null') || userAgent.includes('subconverter') || userAgent.includes('nekobox') || userAgent.includes(('CF-Workers-SUB').toLowerCase())) {
@@ -267,29 +252,6 @@ async function nginx() {
 	</html>
 	`
 	return text;
-}
-
-async function sendMessage(type, ip, add_data = "") {
-	if (BotToken !== '' && ChatID !== '') {
-		let msg = "";
-		const response = await fetch(`http://ip-api.com/json/${ip}?lang=zh-CN`);
-		if (response.status == 200) {
-			const ipInfo = await response.json();
-			msg = `${type}\nIP: ${ip}\n国家: ${ipInfo.country}\n<tg-spoiler>城市: ${ipInfo.city}\n组织: ${ipInfo.org}\nASN: ${ipInfo.as}\n${add_data}`;
-		} else {
-			msg = `${type}\nIP: ${ip}\n<tg-spoiler>${add_data}`;
-		}
-
-		let url = "https://api.telegram.org/bot" + BotToken + "/sendMessage?chat_id=" + ChatID + "&parse_mode=HTML&text=" + encodeURIComponent(msg);
-		return fetch(url, {
-			method: 'get',
-			headers: {
-				'Accept': 'text/html,application/xhtml+xml,application/xml;',
-				'Accept-Encoding': 'gzip, deflate, br',
-				'User-Agent': 'Mozilla/5.0 Chrome/90.0.4430.72'
-			}
-		});
-	}
 }
 
 function base64Decode(str) {
@@ -509,17 +471,33 @@ async function 迁移地址列表(env, txt = 'ADD.txt') {
 
 async function KV(request, env, txt = 'ADD.txt', guest) {
 	const url = new URL(request.url);
+	let message = '';
+	let messageType = 'info'; // success, error, info
+
 	try {
 		// POST请求处理
 		if (request.method === "POST") {
 			if (!env.KV) return new Response("未绑定KV空间", { status: 400 });
 			try {
-				const content = await request.text();
-				await env.KV.put(txt, content);
-				return new Response("保存成功");
+				// 使用表单数据处理
+				const contentType = request.headers.get('content-type');
+				if (contentType && contentType.includes('application/x-www-form-urlencoded')) {
+					const formData = await request.formData();
+					const content = formData.get('content') || '';
+					await env.KV.put(txt, content.trim());
+					message = "列表已成功更新！";
+					messageType = 'success';
+				} else {
+					// 如果不是表单，尝试作为纯文本处理 (兼容旧逻辑，但优先表单)
+					const content = await request.text();
+					await env.KV.put(txt, content.trim());
+					message = "列表已成功更新 (纯文本模式)！";
+					messageType = 'success';
+				}
 			} catch (error) {
 				console.error('保存KV时发生错误:', error);
-				return new Response("保存失败: " + error.message, { status: 500 });
+				message = "保存失败: " + error.message;
+				messageType = 'error';
 			}
 		}
 
@@ -533,297 +511,363 @@ async function KV(request, env, txt = 'ADD.txt', guest) {
 			} catch (error) {
 				console.error('读取KV时发生错误:', error);
 				content = '读取数据时发生错误: ' + error.message;
+				messageType = 'error'; // 也将读取错误标记为错误信息
 			}
 		}
 
-		const html = `
-			<!DOCTYPE html>
-			<html>
-				<head>
-					<title>${FileName} 订阅编辑</title>
-					<meta charset="utf-8">
-					<meta name="viewport" content="width=device-width, initial-scale=1">
-					<style>
-						body {
-							margin: 0;
-							padding: 15px; /* 调整padding */
-							box-sizing: border-box;
-							font-size: 13px; /* 设置全局字体大小 */
-						}
-						.editor-container {
-							width: 100%;
-							max-width: 100%;
-							margin: 0 auto;
-						}
-						.editor {
-							width: 100%;
-							height: 300px; /* 调整高度 */
-							margin: 15px 0; /* 调整margin */
-							padding: 10px; /* 调整padding */
-							box-sizing: border-box;
-							border: 1px solid #ccc;
-							border-radius: 4px;
-							font-size: 13px;
-							line-height: 1.5;
-							overflow-y: auto;
-							resize: none;
-						}
-						.save-container {
-							margin-top: 8px; /* 调整margin */
-							display: flex;
-							align-items: center;
-							gap: 10px; /* 调整gap */
-						}
-						.save-btn, .back-btn {
-							padding: 6px 15px; /* 调整padding */
-							color: white;
-							border: none;
-							border-radius: 4px;
-							cursor: pointer;
-						}
-						.save-btn {
-							background: #4CAF50;
-						}
-						.save-btn:hover {
-							background: #45a049;
-						}
-						.back-btn {
-							background: #666;
-						}
-						.back-btn:hover {
-							background: #555;
-						}
-						.save-status {
-							color: #666;
-						}
-					</style>
-					<script src="https://cdn.jsdelivr.net/npm/@keeex/qrcodejs-kx@1.0.2/qrcode.min.js"></script>
-				</head>
-				<body>
-					################################################################<br>
-					Subscribe / sub 订阅地址, 点击链接自动 <strong>复制订阅链接</strong> 并 <strong>生成订阅二维码</strong> <br>
-					---------------------------------------------------------------<br>
-					自适应订阅地址:<br>
-					<a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/${mytoken}?sub','qrcode_0')" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/${mytoken}</a><br>
-					<div id="qrcode_0" style="margin: 10px 10px 10px 10px;"></div>
-					Base64订阅地址:<br>
-					<a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/${mytoken}?b64','qrcode_1')" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/${mytoken}?b64</a><br>
-					<div id="qrcode_1" style="margin: 10px 10px 10px 10px;"></div>
-					clash订阅地址:<br>
-					<a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/${mytoken}?clash','qrcode_2')" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/${mytoken}?clash</a><br>
-					<div id="qrcode_2" style="margin: 10px 10px 10px 10px;"></div>
-					singbox订阅地址:<br>
-					<a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/${mytoken}?sb','qrcode_3')" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/${mytoken}?sb</a><br>
-					<div id="qrcode_3" style="margin: 10px 10px 10px 10px;"></div>
-					surge订阅地址:<br>
-					<a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/${mytoken}?surge','qrcode_4')" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/${mytoken}?surge</a><br>
-					<div id="qrcode_4" style="margin: 10px 10px 10px 10px;"></div>
-					loon订阅地址:<br>
-					<a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/${mytoken}?loon','qrcode_5')" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/${mytoken}?loon</a><br>
-					<div id="qrcode_5" style="margin: 10px 10px 10px 10px;"></div>
-					&nbsp;&nbsp;<strong><a href="javascript:void(0);" id="noticeToggle" onclick="toggleNotice()">查看访客订阅∨</a></strong><br>
-					<div id="noticeContent" class="notice-content" style="display: none;">
-						---------------------------------------------------------------<br>
-						访客订阅只能使用订阅功能，无法查看配置页！<br>
-						GUEST（访客订阅TOKEN）: <strong>${guest}</strong><br>
-						---------------------------------------------------------------<br>
-						自适应订阅地址:<br>
-						<a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/sub?token=${guest}','guest_0')" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/sub?token=${guest}</a><br>
-						<div id="guest_0" style="margin: 10px 10px 10px 10px;"></div>
-						Base64订阅地址:<br>
-						<a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/sub?token=${guest}&b64','guest_1')" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/sub?token=${guest}&b64</a><br>
-						<div id="guest_1" style="margin: 10px 10px 10px 10px;"></div>
-						clash订阅地址:<br>
-						<a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/sub?token=${guest}&clash','guest_2')" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/sub?token=${guest}&clash</a><br>
-						<div id="guest_2" style="margin: 10px 10px 10px 10px;"></div>
-						singbox订阅地址:<br>
-						<a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/sub?token=${guest}&sb','guest_3')" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/sub?token=${guest}&sb</a><br>
-						<div id="guest_3" style="margin: 10px 10px 10px 10px;"></div>
-						surge订阅地址:<br>
-						<a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/sub?token=${guest}&surge','guest_4')" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/sub?token=${guest}&surge</a><br>
-						<div id="guest_4" style="margin: 10px 10px 10px 10px;"></div>
-						loon订阅地址:<br>
-						<a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/sub?token=${guest}&loon','guest_5')" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/sub?token=${guest}&loon</a><br>
-						<div id="guest_5" style="margin: 10px 10px 10px 10px;"></div>
-					</div>
-					---------------------------------------------------------------<br>
-					################################################################<br>
-					订阅转换配置<br>
-					---------------------------------------------------------------<br>
-					SUBAPI（订阅转换后端）: <strong>${subProtocol}://${subConverter}</strong><br>
-					SUBCONFIG（订阅转换配置文件）: <strong>${subConfig}</strong><br>
-					---------------------------------------------------------------<br>
-					################################################################<br>
-					${FileName} 汇聚订阅编辑: 
-					<div class="editor-container">
-						${hasKV ? `
-						<textarea class="editor" 
-							placeholder="${decodeURIComponent(atob('TElOSyVFNyVBNCVCQSVFNCVCRSU4QiVFRiVCQyU4OCVFNCVCOCU4MCVFOCVBMSU4QyVFNCVCOCU4MCVFNCVCOCVBQSVFOCU4QSU4MiVFNyU4MiVCOSVFOSU5MyVCRSVFNiU4RSVBNSVFNSU4RCVCMyVFNSU4RiVBRiVFRiVCQyU4OSVFRiVCQyU5QQp2bGVzcyUzQSUyRiUyRjI0NmFhNzk1LTA2MzctNGY0Yy04ZjY0LTJjOGZiMjRjMWJhZCU0MDEyNy4wLjAuMSUzQTEyMzQlM0ZlbmNyeXB0aW9uJTNEbm9uZSUyNnNlY3VyaXR5JTNEdGxzJTI2c25pJTNEVEcuQ01MaXVzc3NzLmxvc2V5b3VyaXAuY29tJTI2YWxsb3dJbnNlY3VyZSUzRDElMjZ0eXBlJTNEd3MlMjZob3N0JTNEVEcuQ01MaXVzc3NzLmxvc2V5b3VyaXAuY29tJTI2cGF0aCUzRCUyNTJGJTI1M0ZlZCUyNTNEMjU2MCUyM0NGbmF0CnRyb2phbiUzQSUyRiUyRmFhNmRkZDJmLWQxY2YtNGE1Mi1iYTFiLTI2NDBjNDFhNzg1NiU0MDIxOC4xOTAuMjMwLjIwNyUzQTQxMjg4JTNGc2VjdXJpdHklM0R0bHMlMjZzbmklM0RoazEyLmJpbGliaWxpLmNvbSUyNmFsbG93SW5zZWN1cmUlM0QxJTI2dHlwZSUzRHRjcCUyNmhlYWRlclR5cGUlM0Rub25lJTIzSEsKc3MlM0ElMkYlMkZZMmhoWTJoaE1qQXRhV1YwWmkxd2IyeDVNVE13TlRveVJYUlFjVzQyU0ZscVZVNWpTRzlvVEdaVmNFWlJkMjVtYWtORFVUVnRhREZ0U21SRlRVTkNkV04xVjFvNVVERjFaR3RTUzBodVZuaDFielUxYXpGTFdIb3lSbTgyYW5KbmRERTRWelkyYjNCMGVURmxOR0p0TVdwNlprTm1RbUklMjUzRCU0MDg0LjE5LjMxLjYzJTNBNTA4NDElMjNERQoKCiVFOCVBRSVBMiVFOSU5OCU4NSVFOSU5MyVCRSVFNiU4RSVBNSVFNyVBNCVCQSVFNCVCRSU4QiVFRiVCQyU4OCVFNCVCOCU4MCVFOCVBMSU4QyVFNCVCOCU4MCVFNiU5RCVBMSVFOCVBRSVBMiVFOSU5OCU4NSVFOSU5MyVCRSVFNiU4RSVBNSVFNSU4RCVCMyVFNSU4RiVBRiVFRiVCQyU4OSVFRiVCQyU5QQpodHRwcyUzQSUyRiUyRnN1Yi54Zi5mcmVlLmhyJTJGYXV0bw=='))}"
-							id="content">${content}</textarea>
-						<div class="save-container">
-							<button class="save-btn" onclick="saveContent(this)">保存</button>
-							<span class="save-status" id="saveStatus"></span>
+		// 基础 URL
+		const baseUrl = `https://${url.hostname}`;
+		const adminBase = `${baseUrl}/${mytoken}`;
+		// 访客路径调整为 /sub?token=...
+		const guestBase = `${baseUrl}/sub?token=${guest}`; 
+
+		// 定义订阅链接格式
+		const formats = {
+			auto: { name: "自适应订阅", param: "" },
+			base64: { name: "Base64 订阅", param: "&b64" }, // 统一使用 & 连接符
+			clash: { name: "Clash 订阅", param: "&clash" },
+			singbox: { name: "Sing-Box 订阅", param: "&sb" },
+			surge: { name: "Surge 订阅", param: "&surge" },
+			quanx: { name: "Quantumult X 订阅", param: "&quanx" },
+			loon: { name: "Loon 订阅", param: "&loon" },
+		};
+
+		// 生成链接 HTML 的辅助函数
+		function generateLinksHtml(base, isGuest = false) {
+			let linksHtml = '';
+			for (const key in formats) {
+				const format = formats[key];
+				// 对 guest 链接，第一个参数是 ?token=... ，后续用 &
+				// 对 admin 链接，第一个参数是 ? 或直接 /token 后跟 ?
+				let linkUrl;
+				if (isGuest) {
+					linkUrl = base + format.param; // guestBase 已经包含 ?token=
+				} else {
+					// adminBase 是 /token, 第一个参数用 ?
+					linkUrl = base + (format.param ? `?${format.param.substring(1)}` : ''); 
+				}
+
+				linksHtml += `
+					<div class="link-item">
+						<span class="link-name">${format.name}:</span>
+						<div class="link-input-group">
+							<input type="text" value="${linkUrl}" readonly>
+							<button type="button" class="copy-btn" data-clipboard-text="${linkUrl}">复制</button>
 						</div>
-						` : '<p>请绑定 <strong>变量名称</strong> 为 <strong>KV</strong> 的KV命名空间</p>'}
-					</div>
-					<br>
-					################################################################<br>
-					${decodeURIComponent(atob('dGVsZWdyYW0lMjAlRTQlQkElQTQlRTYlQjUlODElRTclQkUlQTQlMjAlRTYlOEElODAlRTYlOUMlQUYlRTUlQTQlQTclRTQlQkQlQUMlN0UlRTUlOUMlQTglRTclQkElQkYlRTUlOEYlOTElRTclODklOEMhJTNDYnIlM0UKJTNDYSUyMGhyZWYlM0QlMjdodHRwcyUzQSUyRiUyRnQubWUlMkZDTUxpdXNzc3MlMjclM0VodHRwcyUzQSUyRiUyRnQubWUlMkZDTUxpdXNzc3MlM0MlMkZhJTNFJTNDYnIlM0UKLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tJTNDYnIlM0UKZ2l0aHViJTIwJUU5JUExJUI5JUU3JTlCJUFFJUU1JTlDJUIwJUU1JTlEJTgwJTIwU3RhciFTdGFyIVN0YXIhISElM0NiciUzRQolM0NhJTIwaHJlZiUzRCUyN2h0dHBzJTNBJTJGJTJGZ2l0aHViLmNvbSUyRmNtbGl1JTJGQ0YtV29ya2Vycy1TVUIlMjclM0VodHRwcyUzQSUyRiUyRmdpdGh1Yi5jb20lMkZjbWxpdSUyRkNGLVdvcmtlcnMtU1VCJTNDJTJGYSUzRSUzQ2JyJTNFCi0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLSUzQ2JyJTNFCiUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMyUyMw=='))}
-					<br><br>UA: <strong>${request.headers.get('User-Agent')}</strong>
-					<script>
-					function copyToClipboard(text, qrcode) {
-						navigator.clipboard.writeText(text).then(() => {
-							alert('已复制到剪贴板');
-						}).catch(err => {
-							console.error('复制失败:', err);
-						});
-						const qrcodeDiv = document.getElementById(qrcode);
-						qrcodeDiv.innerHTML = '';
-						new QRCode(qrcodeDiv, {
-							text: text,
-							width: 220, // 调整宽度
-							height: 220, // 调整高度
-							colorDark: "#000000", // 二维码颜色
-							colorLight: "#ffffff", // 背景颜色
-							correctLevel: QRCode.CorrectLevel.Q, // 设置纠错级别
-							scale: 1 // 调整像素颗粒度
-						});
-					}
-						
-					if (document.querySelector('.editor')) {
-						let timer;
-						const textarea = document.getElementById('content');
-						const originalContent = textarea.value;
-		
-						function goBack() {
-							const currentUrl = window.location.href;
-							const parentUrl = currentUrl.substring(0, currentUrl.lastIndexOf('/'));
-							window.location.href = parentUrl;
-						}
-		
-						function replaceFullwidthColon() {
-							const text = textarea.value;
-							textarea.value = text.replace(/：/g, ':');
-						}
-						
-						function saveContent(button) {
-							try {
-								const updateButtonText = (step) => {
-									button.textContent = \`保存中: \${step}\`;
-								};
-								// 检测是否为iOS设备
-								const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-								
-								// 仅在非iOS设备上执行replaceFullwidthColon
-								if (!isIOS) {
-									replaceFullwidthColon();
-								}
-								updateButtonText('开始保存');
-								button.disabled = true;
+					</div>`;
+			}
+			return linksHtml;
+		}
 
-								// 获取textarea内容和原始内容
-								const textarea = document.getElementById('content');
-								if (!textarea) {
-									throw new Error('找不到文本编辑区域');
-								}
+		const html = `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>${FileName} - 订阅管理</title>
+	<style>
+		:root {
+			--primary-color: #007bff;
+			--secondary-color: #6c757d;
+			--bg-color: #f8f9fa;
+			--card-bg: #ffffff;
+			--text-color: #212529;
+			--border-color: #dee2e6;
+			--link-color: #0056b3;
+			--success-bg: #d1e7dd;
+			--success-text: #0f5132;
+			--success-border: #badbcc;
+			--error-bg: #f8d7da;
+			--error-text: #842029;
+			--error-border: #f5c2c7;
+			--info-bg: #cff4fc;
+			--info-text: #055160;
+			--info-border: #b6effb;
+		}
+		body {
+			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+			margin: 0;
+			background-color: var(--bg-color);
+			color: var(--text-color);
+			line-height: 1.6;
+		}
+		.header {
+			background-color: #343a40;
+			color: white;
+			padding: 1rem 1.5rem;
+			margin-bottom: 2rem;
+			box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+		}
+		.header h1 {
+			margin: 0;
+			font-size: 1.6rem;
+			text-align: center;
+		}
+		.container {
+			max-width: 960px;
+			margin: 0 auto 2rem auto;
+			padding: 0 1rem;
+		}
+		.card {
+			background-color: var(--card-bg);
+			border-radius: 8px;
+			box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
+			margin-bottom: 2rem;
+			overflow: hidden; /* Contain borders */
+		}
+		.card-header {
+			padding: 1rem 1.5rem;
+			border-bottom: 1px solid var(--border-color);
+			background-color: #f1f3f5; /* Slightly different header bg */
+		}
+		.card-header h2 {
+			margin: 0;
+			font-size: 1.3rem;
+			color: #495057;
+		}
+		.card-body {
+			padding: 1.5rem;
+		}
+		/* Tabs */
+		.tab-nav {
+			display: flex;
+			border-bottom: 1px solid var(--border-color);
+			margin-bottom: 1.5rem;
+		}
+		.tab-button {
+			padding: 0.8rem 1.2rem;
+			cursor: pointer;
+			border: none;
+			background-color: transparent;
+			font-size: 1rem;
+			color: var(--secondary-color);
+			border-bottom: 3px solid transparent; /* Placeholder for active state */
+			margin-bottom: -1px; /* Overlap border */
+			transition: color 0.2s ease, border-color 0.2s ease;
+		}
+		.tab-button:hover {
+			color: var(--text-color);
+		}
+		.tab-button.active {
+			color: var(--primary-color);
+			border-bottom-color: var(--primary-color);
+			font-weight: 500;
+		}
+		.tab-content {
+			display: none;
+		}
+		.tab-content.active {
+			display: block;
+		}
+		/* Links Display */
+		.link-item {
+			margin-bottom: 1rem;
+			padding-bottom: 1rem;
+			border-bottom: 1px dashed #e0e0e0;
+		}
+		.link-item:last-child {
+			margin-bottom: 0;
+			padding-bottom: 0;
+			border-bottom: none;
+		}
+		.link-name {
+			display: block;
+			font-weight: 500;
+			margin-bottom: 0.4rem;
+			color: #555;
+		}
+		.link-input-group {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+		}
+		.link-input-group input[type="text"] {
+			flex-grow: 1;
+			padding: 0.5em 0.8em;
+			border: 1px solid #ced4da;
+			border-radius: 4px;
+			font-size: 0.95em;
+			background-color: #e9ecef; /* Readonly background */
+		}
+		.copy-btn {
+			padding: 0.4em 0.9em;
+			font-size: 0.9em;
+			background-color: var(--secondary-color);
+			color: white;
+			border: none;
+			border-radius: 4px;
+			cursor: pointer;
+			transition: background-color 0.2s ease;
+			white-space: nowrap; /* Prevent button text wrapping */
+		}
+		.copy-btn:hover {
+			background-color: #5a6268;
+		}
+		.copy-btn.copied {
+			background-color: #28a745; /* Green for copied */
+			cursor: default;
+		}
 
-								updateButtonText('获取内容');
-								let newContent;
-								let originalContent;
-								try {
-									newContent = textarea.value || '';
-									originalContent = textarea.defaultValue || '';
-								} catch (e) {
-									console.error('获取内容错误:', e);
-									throw new Error('无法获取编辑内容');
-								}
+		/* Editor */
+		label {
+			display: block;
+			margin-bottom: 0.5rem;
+			font-weight: 500;
+		}
+		textarea {
+			width: 100%;
+			min-height: 300px;
+			margin-bottom: 1rem;
+			border: 1px solid var(--border-color);
+			border-radius: 4px;
+			padding: 0.75em;
+			font-size: 14px;
+			line-height: 1.5;
+			box-sizing: border-box;
+			resize: vertical;
+		}
+		.save-btn {
+			padding: 0.75em 1.5em;
+			background-color: var(--primary-color);
+			color: white;
+			border: none;
+			border-radius: 4px;
+			cursor: pointer;
+			font-size: 1em;
+			transition: background-color 0.2s ease;
+		}
+		.save-btn:hover {
+			background-color: #0056b3;
+		}
 
-								updateButtonText('准备状态更新函数');
-								const updateStatus = (message, isError = false) => {
-									const statusElem = document.getElementById('saveStatus');
-									if (statusElem) {
-										statusElem.textContent = message;
-										statusElem.style.color = isError ? 'red' : '#666';
-									}
-								};
+		/* Messages */
+		.message {
+			padding: 1rem 1.25rem;
+			margin-bottom: 1.5rem;
+			border: 1px solid transparent;
+			border-radius: 0.375rem;
+			font-size: 0.95rem;
+		}
+		.message.success { color: var(--success-text); background-color: var(--success-bg); border-color: var(--success-border); }
+		.message.error { color: var(--error-text); background-color: var(--error-bg); border-color: var(--error-border); }
+		.message.info { color: var(--info-text); background-color: var(--info-bg); border-color: var(--info-border); }
 
-								updateButtonText('准备按钮重置函数');
-								const resetButton = () => {
-									button.textContent = '保存';
-									button.disabled = false;
-								};
+		/* Footer */
+		footer {
+			text-align: center;
+			margin-top: 3rem;
+			padding: 1.5rem 1rem;
+			font-size: 0.9em;
+			color: #6c757d;
+			border-top: 1px solid var(--border-color);
+		}
+	</style>
+</head>
+<body>
+	<header class="header">
+		<h1>${FileName} - 订阅管理</h1>
+	</header>
 
-								if (newContent !== originalContent) {
-									updateButtonText('发送保存请求');
-									fetch(window.location.href, {
-										method: 'POST',
-										body: newContent,
-										headers: {
-											'Content-Type': 'text/plain;charset=UTF-8'
-										},
-										cache: 'no-cache'
-									})
-									.then(response => {
-										updateButtonText('检查响应状态');
-										if (!response.ok) {
-											throw new Error(\`HTTP error! status: \${response.status}\`);
-										}
-										updateButtonText('更新保存状态');
-										const now = new Date().toLocaleString();
-										document.title = \`编辑已保存 \${now}\`;
-										updateStatus(\`已保存 \${now}\`);
-									})
-									.catch(error => {
-										updateButtonText('处理错误');
-										console.error('Save error:', error);
-										updateStatus(\`保存失败: \${error.message}\`, true);
-									})
-									.finally(() => {
-										resetButton();
-									});
-								} else {
-									updateButtonText('检查内容变化');
-									updateStatus('内容未变化');
-									resetButton();
-								}
-							} catch (error) {
-								console.error('保存过程出错:', error);
-								button.textContent = '保存';
-								button.disabled = false;
-								const statusElem = document.getElementById('saveStatus');
-								if (statusElem) {
-									statusElem.textContent = \`错误: \${error.message}\`;
-									statusElem.style.color = 'red';
-								}
-							}
-						}
-		
-						textarea.addEventListener('blur', saveContent);
-						textarea.addEventListener('input', () => {
-							clearTimeout(timer);
-							timer = setTimeout(saveContent, 5000);
-						});
-					}
+	<div class="container">
+		${message ? `<div class="message ${messageType}">${content || message}</div>` : ''} 
 
-					function toggleNotice() {
-						const noticeContent = document.getElementById('noticeContent');
-						const noticeToggle = document.getElementById('noticeToggle');
-						if (noticeContent.style.display === 'none' || noticeContent.style.display === '') {
-							noticeContent.style.display = 'block';
-							noticeToggle.textContent = '隐藏访客订阅∧';
-						} else {
-							noticeContent.style.display = 'none';
-							noticeToggle.textContent = '查看访客订阅∨';
-						}
-					}
-			
-					// 初始化 noticeContent 的 display 属性
-					document.addEventListener('DOMContentLoaded', () => {
-						document.getElementById('noticeContent').style.display = 'none';
-					});
-					</script>
-				</body>
-			</html>
+		<!-- 订阅链接展示卡片 -->
+		<div class="card">
+			<div class="card-header">
+				<h2>订阅链接</h2>
+			</div>
+			<div class="card-body">
+				<div class="tab-nav">
+					<button class="tab-button active" data-tab="admin-links">管理员订阅</button>
+					<button class="tab-button" data-tab="guest-links">访客订阅</button>
+				</div>
+
+				<div id="admin-links" class="tab-content active">
+					${generateLinksHtml(adminBase, false)}
+				</div>
+
+				<div id="guest-links" class="tab-content">
+					${guest ? generateLinksHtml(guestBase, true) : '<p>未配置访客令牌 (GUESTTOKEN 或 GUEST 环境变量)。</p>'}
+				</div>
+			</div>
+		</div>
+
+		<!-- KV 编辑器卡片 -->
+		${hasKV ? `
+		<div class="card">
+			<div class="card-header">
+				<h2>编辑订阅源 (${txt})</h2>
+			</div>
+			<div class="card-body">
+				<form method="POST" action="">
+					<label for="content">源列表 (每行一个链接或节点信息):</label>
+					<textarea id="content" name="content" placeholder="在此输入订阅链接或节点信息，每行一个...\n例如:\nhttps://example.com/mysub\nvmess://...\ntrojan://...">${content}</textarea>
+					<button type="submit" class="save-btn">保存更改</button>
+				</form>
+			</div>
+		</div>
+		` : `
+		<div class="card">
+			<div class="card-body">
+				<p><strong>注意:</strong> 未绑定名为 <strong>KV</strong> 的 KV 命名空间，无法在线编辑订阅源列表。</p>
+				<p>当前使用的是环境变量或代码内置的默认源。</p>
+			</div>
+		</div>
+		`}
+	</div>
+
+	<footer>
+		Powered by Cloudflare Workers
+	</footer>
+
+	<script>
+		// Tab 切换逻辑
+		const tabButtons = document.querySelectorAll('.tab-button');
+		const tabContents = document.querySelectorAll('.tab-content');
+
+		tabButtons.forEach(button => {
+			button.addEventListener('click', () => {
+				// 移除所有按钮的 active 类
+				tabButtons.forEach(btn => btn.classList.remove('active'));
+				// 为点击的按钮添加 active 类
+				button.classList.add('active');
+
+				// 隐藏所有内容区域
+				tabContents.forEach(content => content.classList.remove('active'));
+				// 显示目标内容区域
+				const targetTab = button.getAttribute('data-tab');
+				document.getElementById(targetTab).classList.add('active');
+			});
+		});
+
+		// 复制按钮逻辑
+		document.querySelectorAll('.copy-btn').forEach(button => {
+			button.addEventListener('click', () => {
+				const textToCopy = button.getAttribute('data-clipboard-text');
+				navigator.clipboard.writeText(textToCopy).then(() => {
+					const originalText = button.textContent;
+					button.textContent = '已复制!';
+					button.classList.add('copied');
+					button.disabled = true;
+					setTimeout(() => {
+						button.textContent = originalText;
+						button.classList.remove('copied');
+						button.disabled = false;
+					}, 1500);
+				}).catch(err => {
+					console.error('复制失败:', err);
+					// 可以添加更友好的错误提示
+					button.textContent = '失败';
+					 setTimeout(() => {
+						button.textContent = '复制';
+					 }, 2000);
+				});
+			});
+		});
+	</script>
+</body>
+</html>
 		`;
 
 		return new Response(html, {
