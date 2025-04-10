@@ -352,31 +352,51 @@ async function generateLegacyMD5(text) {
 	}
 }
 
+/**
+ * @description 对 Clash 配置内容应用特定的修复规则。
+ * 主要是尝试修复 subconverter 可能遗漏的 WireGuard 'remote-dns-resolve: true' 字段。
+ * @param {string} clashContent - 原始 Clash 配置文本。
+ * @returns {string} - 应用修复后的 Clash 配置文本。
+ */
 function applyClashFixes(clashContent) {
 	try {
+		// 检查是否包含 WireGuard 配置且缺少 remote-dns-resolve
 		if (clashContent.includes('type: wireguard') && !clashContent.includes('remote-dns-resolve:')) {
-			let lines;
-			if (clashContent.includes('\r\n')) {
-				lines = clashContent.split('\r\n');
-			} else {
-				lines = clashContent.split('\n');
-			}
+			// 尝试在 udp: true 前添加 remote-dns-resolve: true
+			// 正则查找 type: wireguard 块，找到包含 mtu 和 udp: true 的行进行替换
+			// 注意：这个正则比较脆弱，如果 YAML 格式稍有不同可能匹配失败
+			const patternToReplace = /^(.*,\s*mtu:\s*\d+,\s*)(udp:\s*true.*)$/m; // 匹配包含 mtu 和 udp: true 的行
+			const replacementString = '$1remote-dns-resolve: true, $2'; // 在 mtu 之后、udp 之前插入
 
-			let result = "";
-			for (let line of lines) {
-				if (line.includes('type: wireguard')) {
-					const 备改内容 = `, mtu: 1280, udp: true`;
-					const 正确内容 = `, mtu: 1280, remote-dns-resolve: true, udp: true`;
-					result += line.replace(new RegExp(备改内容, 'g'), 正确内容) + '\n';
+			clashContent = clashContent.replace(patternToReplace, replacementString);
+
+			// 备用方法：如果上面的正则无效，可以尝试更简单的行替换 (效果可能不精确)
+			/*
+			if (!clashContent.includes('remote-dns-resolve: true')) { // 再次检查，防止正则失败
+				let lines;
+				if (clashContent.includes('\\r\\n')) {
+					lines = clashContent.split('\\r\\n');
 				} else {
-					result += line + '\n';
+					lines = clashContent.split('\\n');
 				}
-			}
 
-			clashContent = result;
+				let result = "";
+				for (let line of lines) {
+					// 查找包含 mtu 和 udp: true 的行
+					if (line.includes('mtu:') && line.includes('udp: true')) {
+						 // 简单地在行尾追加，可能格式不完美
+						result += line.trim() + ', remote-dns-resolve: true' + '\\n';
+					} else {
+						result += line + '\\n';
+					}
+				}
+				 clashContent = result;
+			}
+			*/
 		}
 	} catch (error) {
 		console.error("应用 Clash 修复时出错:", error);
+		// 出错时返回原始内容，避免破坏配置
 	}
 	return clashContent;
 }
@@ -535,12 +555,21 @@ async function migrateKvKey(env, keyName) {
 	}
 }
 
+/**
+ * @description 处理管理员页面的请求 (原 KV 函数)，提供编辑和链接展示功能。
+ * @param {Request} request - 传入的请求对象。
+ * @param {object} env - Cloudflare 环境变量和绑定 (包含 KV)。
+ * @param {string} kvKey - 用于存储订阅源列表的 KV 键名。
+ * @param {string} guestTokenReadOnly - 只读的访客令牌，用于在页面上显示。
+ * @returns {Promise<Response>} - 返回包含管理界面的 HTML 响应。
+ */
 async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 	const url = new URL(request.url);
 	let message = '';
-	let messageType = 'info';
+	let messageType = 'info'; // 'success', 'error', 'info'
 
 	try {
+		// --- 处理 POST 请求 (保存 KV 内容) ---
 		if (request.method === "POST") {
 			if (!env.KV) {
 				return new Response("错误: 未绑定 KV 命名空间。", { status: 500 });
@@ -565,6 +594,7 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 			}
 		}
 
+		// --- 处理 GET 请求 (显示页面) ---
 		let currentKvContent = '';
 		let kvAvailable = !!env.KV;
 
@@ -573,8 +603,8 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 				currentKvContent = await env.KV.get(kvKey) || '';
 			} catch (error) {
 				console.error('读取 KV 时发生错误:', error);
-				currentKvContent = '读取订阅源列表时出错: ' + error.message;
-				message = '无法加载当前列表内容。';
+				currentKvContent = '读取订阅源列表时出错: ' + error.message; // 在文本框中显示错误
+				message = '无法加载当前列表内容。'; // 同时显示提示信息
 				messageType = 'error';
 			}
 		} else {
@@ -582,6 +612,7 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 			messageType = 'info';
 		}
 
+		// --- 生成页面 HTML ---
 		const baseUrl = `https://${url.hostname}`;
 		const adminBaseUrl = `${baseUrl}/${adminToken}`;
 		const guestBaseUrl = `${baseUrl}/sub?token=${guestTokenReadOnly}`;
@@ -596,8 +627,12 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 			loon: { name: "Loon 订阅", param: "loon" },
 		};
 
+		// 辅助函数：生成链接列表的 HTML (包含高级格式切换)
 		function generateLinkListHtml(base, isGuest = false) {
-			let linksHtml = '';
+			let autoLinkHtml = '';
+			let advancedLinksHtml = '';
+			const tabIdPrefix = isGuest ? 'guest' : 'admin'; // 用于生成唯一的 ID
+
 			for (const key in linkFormats) {
 				const format = linkFormats[key];
 				let finalUrl = '';
@@ -607,7 +642,7 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 					finalUrl = base + (format.param ? `?${format.param}` : '');
 				}
 
-				linksHtml += `
+				const linkItemHtml = `
 					<div class="link-item">
 						<span class="link-name">${format.name}:</span>
 						<div class="link-input-group">
@@ -615,10 +650,26 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 							<button type="button" class="copy-btn" data-clipboard-text="${finalUrl}">复制</button>
 						</div>
 					</div>`;
+
+				if (key === 'auto') {
+					autoLinkHtml = linkItemHtml; // 单独存储自适应链接
+				} else {
+					advancedLinksHtml += linkItemHtml; // 累加其他高级链接
+				}
 			}
-			return linksHtml;
+
+			// 添加切换按钮和包含高级链接的容器
+			const advancedSectionHtml = `
+				<button type="button" class="toggle-advanced-btn" data-target="${tabIdPrefix}-advanced-links">显示高级格式</button>
+				<div class="advanced-links" id="${tabIdPrefix}-advanced-links" style="display: none;">
+					${advancedLinksHtml}
+				</div>
+			`;
+
+			return autoLinkHtml + advancedSectionHtml; // 先显示自适应，后跟切换按钮和隐藏的高级部分
 		}
 
+		// 拼接完整的 HTML 页面
 		const html = `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -627,6 +678,7 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>${subscriptionFileName} - 订阅管理</title>
 	<style>
+		/* CSS 样式 (基本同上，增加 toggle 按钮样式) */
 		:root {
 			--primary-color: #0d6efd;
 			--secondary-color: #6c757d;
@@ -649,144 +701,67 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 			--copied-btn-bg: #ffca2c;
 			--copied-btn-text: #000;
 		}
-		body {
-			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-			margin: 0;
-			background-color: var(--bg-color);
-			color: var(--text-color);
-			line-height: 1.6;
-			font-size: 16px;
-		}
-		.header {
-			background-color: #212529;
-			color: white;
-			padding: 1rem 1.5rem;
-			margin-bottom: 2rem;
-			box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-		}
-		.header h1 {
-			margin: 0;
-			font-size: 1.5rem;
-			text-align: center;
-			font-weight: 500;
-		}
-		.container {
-			max-width: 960px;
-			margin: 0 auto 2rem auto;
-			padding: 0 1rem;
-		}
-		.card {
-			background-color: var(--card-bg);
-			border: 1px solid var(--border-color);
-			border-radius: 0.375rem;
-			box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-			margin-bottom: 1.5rem;
-			overflow: hidden;
-		}
-		.card-header {
-			padding: 1rem 1.25rem;
-			border-bottom: 1px solid var(--border-color);
-			background-color: #f8f9fa;
-		}
-		.card-header h2 {
-			margin: 0;
-			font-size: 1.25rem;
-			font-weight: 500;
-		}
-		.card-body {
-			padding: 1.25rem;
-		}
-		.tab-nav {
-			display: flex;
-			border-bottom: 1px solid var(--border-color);
-			margin: 0 -1.25rem 1.25rem -1.25rem;
-			padding: 0 1.25rem;
-		}
-		.tab-button {
-			padding: 0.75rem 1rem;
-			cursor: pointer;
-			border: none;
-			background-color: transparent;
-			font-size: 1rem;
-			color: var(--secondary-color);
-			border-bottom: 3px solid transparent;
-			margin-bottom: -1px;
-			transition: color 0.2s ease, border-color 0.2s ease;
-			font-weight: 500;
-		}
-		.tab-button:hover {
-			color: var(--text-color);
-		}
-		.tab-button.active {
-			color: var(--primary-color);
-			border-bottom-color: var(--primary-color);
-		}
+		body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; background-color: var(--bg-color); color: var(--text-color); line-height: 1.6; font-size: 16px; }
+		.header { background-color: #212529; color: white; padding: 1rem 1.5rem; margin-bottom: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+		.header h1 { margin: 0; font-size: 1.5rem; text-align: center; font-weight: 500; }
+		.container { max-width: 960px; margin: 0 auto 2rem auto; padding: 0 1rem; }
+		.card { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 0.375rem; box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075); margin-bottom: 1.5rem; overflow: hidden; }
+		.card-header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border-color); background-color: #f8f9fa; }
+		.card-header h2 { margin: 0; font-size: 1.25rem; font-weight: 500; }
+		.card-body { padding: 1.25rem; }
+		/* Tabs */
+		.tab-nav { display: flex; border-bottom: 1px solid var(--border-color); margin: 0 -1.25rem 1.25rem -1.25rem; padding: 0 1.25rem; }
+		.tab-button { padding: 0.75rem 1rem; cursor: pointer; border: none; background-color: transparent; font-size: 1rem; color: var(--secondary-color); border-bottom: 3px solid transparent; margin-bottom: -1px; transition: color 0.2s ease, border-color 0.2s ease; font-weight: 500; }
+		.tab-button:hover { color: var(--text-color); }
+		.tab-button.active { color: var(--primary-color); border-bottom-color: var(--primary-color); }
 		.tab-content { display: none; }
 		.tab-content.active { display: block; }
 
-		.link-item {
-			margin-bottom: 1rem;
-			padding-bottom: 1rem;
-			border-bottom: 1px solid #f1f3f5;
-		}
+		/* Links Display */
+		.link-item { margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #f1f3f5; }
 		.link-item:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
 		.link-name { display: block; font-weight: 500; margin-bottom: 0.4rem; color: #495057; }
 		.link-input-group { display: flex; align-items: center; gap: 0.5rem; }
-		.link-input-group input[type="text"] {
-			flex-grow: 1;
-			padding: 0.5rem 0.75rem;
-			border: 1px solid var(--border-color);
-			border-radius: 0.25rem;
-			font-size: 0.95rem;
-			background-color: var(--bg-color);
-			font-family: monospace;
-		}
-		.copy-btn {
-			padding: 0.4rem 0.8rem;
-			font-size: 0.875rem;
-			background-color: var(--copy-btn-bg);
-			color: white;
-			border: none;
-			border-radius: 0.25rem;
-			cursor: pointer;
-			transition: background-color 0.2s ease;
-			white-space: nowrap;
-		}
+		.link-input-group input[type="text"] { flex-grow: 1; padding: 0.5rem 0.75rem; border: 1px solid var(--border-color); border-radius: 0.25rem; font-size: 0.95rem; background-color: var(--bg-color); font-family: monospace; }
+		.copy-btn { padding: 0.4rem 0.8rem; font-size: 0.875rem; background-color: var(--copy-btn-bg); color: white; border: none; border-radius: 0.25rem; cursor: pointer; transition: background-color 0.2s ease; white-space: nowrap; }
 		.copy-btn:hover { background-color: var(--copy-btn-hover-bg); }
 		.copy-btn.copied { background-color: var(--copied-btn-bg); color: var(--copied-btn-text); cursor: default; }
 
-		label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
-		textarea {
-			width: 100%;
-			min-height: 350px;
-			margin-bottom: 1rem;
-			border: 1px solid var(--border-color);
-			border-radius: 0.25rem;
-			padding: 0.75rem;
-			font-size: 14px;
-			line-height: 1.5;
-			box-sizing: border-box;
-			resize: vertical;
-			font-family: monospace;
-		}
-		.save-btn {
-			padding: 0.6rem 1.2rem;
-			background-color: var(--primary-color);
-			color: white;
-			border: none;
-			border-radius: 0.25rem;
+		/* Advanced Toggle */
+		.toggle-advanced-btn {
+			background-color: transparent;
+			border: 1px solid var(--secondary-color);
+			color: var(--secondary-color);
+			padding: 0.3em 0.8em;
+			font-size: 0.85em;
+			border-radius: 4px;
 			cursor: pointer;
-			font-size: 1rem;
-			font-weight: 500;
-			transition: background-color 0.2s ease;
+			margin-top: 1rem; /* 与自适应链接保持距离 */
+			transition: background-color 0.2s ease, color 0.2s ease;
 		}
+		.toggle-advanced-btn:hover {
+			background-color: #e9ecef;
+			color: var(--text-color);
+		}
+		.advanced-links {
+			margin-top: 1rem;
+			padding-top: 1rem;
+			border-top: 1px solid #eee; /* 分隔线 */
+		}
+
+		/* Editor */
+		label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+		textarea { width: 100%; min-height: 350px; margin-bottom: 1rem; border: 1px solid var(--border-color); border-radius: 0.25rem; padding: 0.75rem; font-size: 14px; line-height: 1.5; box-sizing: border-box; resize: vertical; font-family: monospace; }
+		.save-btn { padding: 0.6rem 1.2rem; background-color: var(--primary-color); color: white; border: none; border-radius: 0.25rem; cursor: pointer; font-size: 1rem; font-weight: 500; transition: background-color 0.2s ease; }
 		.save-btn:hover { background-color: #0b5ed7; }
 
+		/* Messages */
 		.message { padding: 1rem 1.25rem; margin-bottom: 1.5rem; border: 1px solid transparent; border-radius: 0.375rem; font-size: 0.95rem; }
 		.message.success { color: var(--success-text); background-color: var(--success-bg); border-color: var(--success-border); }
 		.message.error { color: var(--error-text); background-color: var(--error-bg); border-color: var(--error-border); }
 		.message.info { color: var(--info-text); background-color: var(--info-bg); border-color: var(--info-border); }
 
+		/* Footer */
 		footer { text-align: center; margin-top: 3rem; padding: 1.5rem 1rem; font-size: 0.875rem; color: var(--secondary-color); border-top: 1px solid var(--border-color); }
 	</style>
 </head>
@@ -798,6 +773,7 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 	<div class="container">
 		${message ? `<div class="message ${messageType}">${message}</div>` : ''}
 
+		<!-- 订阅链接展示卡片 -->
 		<div class="card">
 			<div class="card-header">
 				<h2>订阅链接</h2>
@@ -818,6 +794,7 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 			</div>
 		</div>
 
+		<!-- KV 编辑器卡片 -->
 		${kvAvailable ? `
 		<div class="card">
 			<div class="card-header">
@@ -833,7 +810,7 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 		</div>
 		` : `
 		<div class="card">
-			<div class="card-header"><h2>提示</h2></div>
+			 <div class="card-header"><h2>提示</h2></div>
 			<div class="card-body message info">
 				<p><strong>注意:</strong> 未绑定名为 <strong>KV</strong> 的 KV 命名空间，无法在线编辑订阅源列表。</p>
 				<p>当前使用的是环境变量或代码内置的默认源。如需编辑，请在 Cloudflare 后台绑定 KV 命名空间。</p>
@@ -847,9 +824,9 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 	</footer>
 
 	<script>
+		// Tab 切换逻辑
 		const tabButtons = document.querySelectorAll('.tab-button');
 		const tabContents = document.querySelectorAll('.tab-content');
-
 		tabButtons.forEach(button => {
 			button.addEventListener('click', () => {
 				tabButtons.forEach(btn => btn.classList.remove('active'));
@@ -859,6 +836,7 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 			});
 		});
 
+		// 复制按钮逻辑
 		document.querySelectorAll('.copy-btn').forEach(button => {
 			button.addEventListener('click', () => {
 				const textToCopy = button.getAttribute('data-clipboard-text');
@@ -877,6 +855,19 @@ async function handleAdminPage(request, env, kvKey, guestTokenReadOnly) {
 					button.textContent = '失败';
 					 setTimeout(() => { button.textContent = '复制'; }, 2000);
 				});
+			});
+		});
+
+		// 高级格式切换逻辑
+		document.querySelectorAll('.toggle-advanced-btn').forEach(button => {
+			button.addEventListener('click', () => {
+				const targetId = button.getAttribute('data-target');
+				const targetContainer = document.getElementById(targetId);
+				if (targetContainer) {
+					const isHidden = targetContainer.style.display === 'none';
+					targetContainer.style.display = isHidden ? 'block' : 'none';
+					button.textContent = isHidden ? '隐藏高级格式' : '显示高级格式';
+				}
 			});
 		});
 	</script>
