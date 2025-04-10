@@ -134,7 +134,10 @@ export default {
 		}
 
 		const isBrowser = userAgent.includes('mozilla');
-		const showAdminPage = isBrowser && token === adminToken && (isRootPath || isAdminPath && url.search === '');
+		const showAdminPage = isBrowser && (
+			isAdminPath ||
+			(isRootPath && token === adminToken)
+		);
 
 		if (env.KV && showAdminPage) {
 			await migrateKvKey(env, 'LINK.txt');
