@@ -80,7 +80,7 @@ let subConverterApiHost = "psub.888005.xyz"; // 或 "subconverter.example.com"
  * 可以在 Cloudflare 环境变量中设置 `SUBCONFIG` 来覆盖。
  * @type {string}
  */
-let subConverterConfigUrl = "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_MultiCountry.ini";
+let subConverterConfigUrl = "https://raw.githubusercontent.com/lee99/clash-ruler/refs/heads/main/Clash-LIAN.ini";
 
 /**
  * @description 访问订阅转换后端使用的协议。
